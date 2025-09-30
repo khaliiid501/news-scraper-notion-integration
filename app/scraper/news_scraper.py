@@ -106,7 +106,7 @@ class NewsScraper:
 
     async def _parse_rss_entry(
         self, entry, source_name: str, feed_url: str
-    ) -> Optional[ArticleCreate]:
+    ) -> ArticleCreate | None:
         """Parse a single RSS entry into an ArticleCreate object."""
         # Extract basic information
         title = getattr(entry, 'title', '').strip()

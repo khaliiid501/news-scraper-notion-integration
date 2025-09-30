@@ -16,25 +16,40 @@ database_url = settings.database_url
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# Create async engine
-engine = create_async_engine(
-    database_url,
-    echo=settings.debug,
-    poolclass=StaticPool if "sqlite" in database_url else None,
-    connect_args={"check_same_thread": False} if "sqlite" in database_url else {},
-)
+# Create async engine (lazy initialization to avoid import errors)
+engine = None
+AsyncSessionLocal = None
 
-# Create async session factory
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+
+def get_engine():
+    """Get or create the database engine."""
+    global engine
+    if engine is None:
+        engine = create_async_engine(
+            database_url,
+            echo=settings.debug,
+            poolclass=StaticPool if "sqlite" in database_url else None,
+            connect_args={"check_same_thread": False} if "sqlite" in database_url else {},
+        )
+    return engine
+
+
+def get_session_local():
+    """Get or create the session factory."""
+    global AsyncSessionLocal
+    if AsyncSessionLocal is None:
+        AsyncSessionLocal = async_sessionmaker(
+            get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+    return AsyncSessionLocal
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency to get database session."""
-    async with AsyncSessionLocal() as session:
+    session_local = get_session_local()
+    async with session_local() as session:
         try:
             yield session
         except Exception:
@@ -47,6 +62,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def create_tables() -> None:
     """Create all database tables."""
     try:
+        engine = get_engine()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables created successfully")
@@ -58,6 +74,7 @@ async def create_tables() -> None:
 async def drop_tables() -> None:
     """Drop all database tables."""
     try:
+        engine = get_engine()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         logger.info("Database tables dropped successfully")
